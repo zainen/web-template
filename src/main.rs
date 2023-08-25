@@ -1,88 +1,44 @@
-
 use actix_cors::Cors;
-
 use actix_web::{http::header, web, App, HttpServer, Responder, HttpResponse};
-
 use serde::{Deserialize, Serialize};
-
 use reqwest::Client as HttpClient;
-
 use async_trait::async_trait;
-
 use std::sync::Mutex;
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct Task {
+struct ForexPair {
     id: u64,
-    name: String,
-    complete: bool
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct User {
-    id: u64,
-    username: String,
-    password: String
+    pair: String,
+    price: f64
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Database {
-    tasks: HashMap<u64, Task>,
-    users: HashMap<u64, User>
+    forex_pairs: HashMap<u64, ForexPair>,
 }
 
 impl Database {
     fn new() -> Self {
         Self {
-            tasks: HashMap::new(),
-            users: HashMap::new()
+            forex_pairs: HashMap::new(),
         }
     }
 
-    fn insert(&mut self, task: Task) {
-        self.tasks.insert(task.id, task);
+    fn insert(&mut self, forex_pair: ForexPair) {
+        self.forex_pairs.insert(forex_pair.id, forex_pair);
     }
 
-    fn get(&self, id: &u64) -> Option<&Task> {
-        self.tasks.get(id)
+    fn get(&self, id: &u64) -> Option<&ForexPair> {
+        self.forex_pairs.get(id)
     }
 
-    fn get_all(&self) -> Vec<&Task> {
-        self.tasks.values().collect()
+    fn get_all(&self) -> Vec<&ForexPair> {
+        self.forex_pairs.values().collect()
     }
 
-    fn delete(&mut self, id: &u64) {
-        self.tasks.remove(id);
-    }
-
-    fn update(&mut self, task: Task) {
-        self.tasks.insert(task.id, task);
-    }
-
-    // USER DATA RELATED FUNCTIONS
-    fn insert_user(&mut self, user: User) {
-        self.users.insert(user.id, user);
-    }
-
-    fn get_user_by_name(&mut self, name: &str) -> Option<&User> {
-        self.users.values().find(|u|  u.username == name )
-    }
-
-    //DB SAVING
-    fn save_to_file(&self) -> std::io::Result<()> {
-        let data: String = serde_json::to_string(&self)?;
-        let mut file: fs::File = fs::File::create("database.json")?;
-        file.write_all(data.as_bytes())?;
-        Ok(())
-    }
-
-    fn load_from_file() -> std::io::Result<Self> {
-        let file_content = fs::read_to_string("database.json")?;
-        let db: Database = serde_json::from_str(&file_content)?;
-        Ok(db)
+    fn update(&mut self, forex_pair: ForexPair) {
+        self.forex_pairs.insert(forex_pair.id, forex_pair);
     }
 }
 
@@ -90,64 +46,35 @@ struct AppState {
     db: Mutex<Database>
 }
 
-async fn create_task(app_state: web::Data<AppState>, task: web::Json<Task>) -> impl Responder {
+async fn create_forex_pair(app_state: web::Data<AppState>, forex_pair: web::Json<ForexPair>) -> impl Responder {
     let mut db: std::sync::MutexGuard<Database> = app_state.db.lock().unwrap();
-    db.insert(task.into_inner());
-    let _ = db.save_to_file();
+    db.insert(forex_pair.into_inner());
     HttpResponse::Ok().finish()
 } 
 
-async fn read_task(app_state: web::Data<AppState>, id: web::Path<u64>) -> impl Responder {
+async fn read_forex_pair(app_state: web::Data<AppState>, id: web::Path<u64>) -> impl Responder {
     let db: std::sync::MutexGuard<Database> = app_state.db.lock().unwrap();
     match db.get(&id.into_inner()) {
-        Some(task) => HttpResponse::Ok().json(task),
+        Some(forex_pair) => HttpResponse::Ok().json(forex_pair),
         None => HttpResponse::NotFound().finish()
     }
 }
 
-async fn read_all_tasks(app_state: web::Data<AppState>) -> impl Responder {
+async fn read_all_forex_pairs(app_state: web::Data<AppState>) -> impl Responder {
     let db: std::sync::MutexGuard<Database> = app_state.db.lock().unwrap();
-    let tasks = db.get_all();
-    HttpResponse::Ok().json(tasks)
+    let forex_pairs = db.get_all();
+    HttpResponse::Ok().json(forex_pairs)
 }
 
-async fn update_task(app_state: web::Data<AppState>, task: web::Json<Task>) -> impl Responder {
+async fn update_forex_pair(app_state: web::Data<AppState>, forex_pair: web::Json<ForexPair>) -> impl Responder {
     let mut db: std::sync::MutexGuard<Database> = app_state.db.lock().unwrap();
-    db.update(task.into_inner());
-    let _ = db.save_to_file();
+    db.update(forex_pair.into_inner());
     HttpResponse::Ok().finish()
-}
-
-async fn delete_task(app_state: web::Data<AppState>, id: web::Path<u64>) -> impl Responder {
-    let mut db: std::sync::MutexGuard<Database> = app_state.db.lock().unwrap();
-    db.delete(&id.into_inner());
-    let _ = db.save_to_file();
-    HttpResponse::Ok().finish()
-}
-
-async fn register(app_state: web::Data<AppState>, user: web::Json<User>) -> impl Responder {
-    let mut db: std::sync::MutexGuard<Database> = app_state.db.lock().unwrap();
-    db.insert_user(user.into_inner());
-    let _ = db.save_to_file();
-    HttpResponse::Ok().finish()
-}
-
-async fn login(app_state: web::Data<AppState>, user: web::Json<User>) -> impl Responder {
-    let mut db: std::sync::MutexGuard<Database> = app_state.db.lock().unwrap();
-    match db.get_user_by_name(&user.username) {
-        Some(stored_user) if stored_user.password == user.password => {
-            HttpResponse::Ok().body("Logged in!")
-        },
-        _ => HttpResponse::BadRequest().body("Invalid username or password")
-    }
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let db = match Database::load_from_file() {
-        Ok(db) => db,
-        Err(_) => Database::new()
-    };
+    let db = Database::new();
 
     let data = web::Data::new(AppState {
         db: Mutex::new(db)
@@ -167,13 +94,10 @@ async fn main() -> std::io::Result<()> {
                 .max_age(3600)
             )
             .app_data(data.clone())
-            .route("/task", web::post().to(create_task))
-            .route("/task", web::get().to(read_all_tasks))
-            .route("/task", web::put().to(update_task))
-            .route("/task/{id}", web::post().to(read_task))
-            .route("task/{id}", web::delete().to(delete_task))
-            .route("/register", web::post().to(register))
-            .route("/login", web::post().to(login))
+            .route("/forex_pair", web::post().to(create_forex_pair))
+            .route("/forex_pair", web::get().to(read_all_forex_pairs))
+            .route("/forex_pair", web::put().to(update_forex_pair))
+            .route("/forex_pair/{id}", web::get().to(read_forex_pair))
     })
     .bind("127.0.0.1:8080")?
     .run()
